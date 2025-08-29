@@ -1,0 +1,16 @@
+programを書くときの注意点
+
+エフェクトの追加
+1.まず画像を読み込ませる(serverとclient一応両方に)
+2.register_effect("all_death_damage", resource_path("img/effects/all_death_damage.png"), 120, 120, 7, 0.08)こんな感じのを入れる
+3.サーバ側のスキルが発動するところにsend_skill_effect("all_death_damage", target["rect"].centerx, target["rect"].centery)こんな感じに追加
+4.client側のeffect_animationsに"all_death_damage": ClientEffectAnimation(resource_path("img/effects/all_death_damage.png"), 120, 120, 7, 0.08)こんな感じに追加
+5.サイズなどはimage_search.pyを用いて随時変更すること
+※画像は横一列に並べることなっていない場合はtrans_image.pyで変更すること
+
+スキルの追加
+
+
+
+
+随時追加していく

@@ -1,0 +1,59 @@
+{
+    "activeFile": "town.json",
+    "expandedProjectPaths": [
+    ],
+    "file.lastUsedOpenFilter": "すべてのファイル (*)",
+    "fileStates": {
+        "/home/miurarento/2年生の文化祭に向けて/2d Game javascript/canvasAIP/town.json": {
+            "scale": 0.1128125,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 1586.7036011080336,
+                "y": 2801.1080332409974
+            }
+        },
+        "/home/miurarento/2年生の文化祭に向けて/2d Game javascript/canvasAIP/town.json#tiles": {
+            "scaleInDock": 1
+        },
+        "/home/miurarento/2年生の文化祭に向けて/2d Game javascript/canvasAIP/town.json#waters": {
+            "scaleInDock": 1
+        },
+        "lava.json": {
+            "scale": 0.5,
+            "selectedLayer": 1,
+            "viewCenter": {
+                "x": 1878,
+                "y": 829
+            }
+        },
+        "lava.json#tiles": {
+            "scaleInDock": 1
+        },
+        "town.json": {
+            "scale": 0.193265625,
+            "selectedLayer": 19,
+            "viewCenter": {
+                "x": 1640.2296062737494,
+                "y": 1601.4229121190074
+            }
+        },
+        "town.json#tiles": {
+            "scaleInDock": 1
+        },
+        "town.json#waters": {
+            "scaleInDock": 1
+        }
+    },
+    "last.imagePath": "/home/miurarento/2年生の文化祭に向けて/2d Game javascript/canvasAIP",
+    "openFiles": [
+        "lava.json",
+        "town.json"
+    ],
+    "project": "Map.tiled-project",
+    "recentFiles": [
+        "lava.json",
+        "town.json",
+        "/home/miurarento/2年生の文化祭に向けて/2d Game javascript/canvasAIP/town.json"
+    ],
+    "tileset.embedInMap": true
+}

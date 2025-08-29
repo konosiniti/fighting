@@ -779,50 +779,23 @@ def handle_client(client_socket, client_address, player_id):
                     elif player["job"] == "Berserker":
                         buffSkill(player, player["job_skill"]["berserked"], 1200, 20)
 
-                # === Assassin：criticalAttackMulti（乱刀）の進行管理 ===
-                if player["job"] == "Assassin":
-                    rando = player["job_skill"].get("criticalAttackMulti", {})
-                    if rando.get("active"):
-                        tid = rando.get("target_id")
-                        target = players_snapshot().get(tid)
-                        send_skill_effect("criticalAttackMulti", target["rect"].centerx, target["rect"].centery)
-                        # 対象が消えた/死亡なら中断
-                        if not target or not target["alive"] or target["hp"] <= 0:
-                            rando["active"] = False
-                        else:
-                            # 次ヒットの時間か？
-                            if time.time() >= rando.get("next_attack_time", 0) and rando.get("attack_remaining", 0) > 0:
-                                # 進行中に大きく離れたら中断（任意）
-                                dx_prog = abs(player["rect"].centerx - target["rect"].centerx)
-                                if dx_prog > 200:
-                                    rando["active"] = False
-                                else:
-                                    # 1ヒット分の与ダメ
-                                    dmg = rando.get("damaged", 500)
-                                    if target["isShield"]:
-                                        target["hp"] -= dmg / 2
-                                    else:
-                                        target["hp"] -= dmg
+               # --- 職業スキル2ボタン押下時（初回押下で初期化） ---
+                if keys[10] and player["job"] == "Assassin":
+                    skill = player["job_skill"]["criticalAttackMulti"]
+                    current_time = time.time()
+                    if not skill.get("active", False) and skill.get("cooldown", 0) <= 0:
+                        skill["active"] = True
+                        skill["target_id"] = get_nearest_target(player_id, 100)
+                        skill["attack_remaining"] = skill.get("hits", 3)
+                        skill["interval"] = skill.get("interval", 0.35)
+                        skill["next_attack_time"] = current_time
+                        skill["damaged"] = skill.get("damaged", 500)
+                        skill["cooldown"] = 400  # 任意クールタイム
 
-                                    # ヒットごとにアニメを刻む（任意）
-                                    player["animation_state"] = "attack2"
-                                    player["animations"]["attack2"].index = 0
-
-                                    # 次回時刻・残回数更新
-                                    rando["attack_remaining"] -= 1
-                                    rando["next_attack_time"] = time.time() + rando.get("interval", 0.35)
-
-                                    # 死亡処理
-                                    if target["hp"] <= 0:
-                                        target["animation_state"] = "dead"
-                                        target["animations"]["dead"].index = 0
-                                        target["alive"] = False
-                                        target["hp"] = 0
-                                        rando["active"] = False
-
-                        # 全ヒット消化で終了
-                        if rando.get("attack_remaining", 0) <= 0:
-                            rando["active"] = False
+                # --- 毎フレームサーバループで連撃処理 ---
+                critical_skill = player["job_skill"].get("criticalAttackMulti")
+                if critical_skill and critical_skill.get("active", False):
+                    attackSkill(player, player_id, critical_skill, cooltime=400)
 
 
                 if just_pressed_13:
@@ -847,6 +820,13 @@ def handle_client(client_socket, client_address, player_id):
                     print(f"Player {player_id} (Wizard) changed element to: {player['element_type']}")
 
 
+            # 毎フレームサーバループで呼ぶ
+            player = players[player_id]
+            critical_skill = player["job_skill"].get("criticalAttackMulti")
+            if critical_skill and critical_skill.get("active", False):
+                attackSkill(player, player_id, critical_skill, cooltime=400)
+
+
             # クールダウン管理（共通・職業スキル）
             for skill in player["common"].values():
                 if skill["cooldown"] > 0 and not skill["active"]:
@@ -860,6 +840,8 @@ def handle_client(client_socket, client_address, player_id):
             for skill_name, skill in player["common"].items():
                 if skill["active"] and current_time >= skill["end_time"]:
                     skill["active"] = False
+
+
 
             update_buff_effects(player)
 
@@ -1181,88 +1163,111 @@ def attackSkill(player, player_id, skill, cooltime):
     current_time = time.time()
     multiplier = get_damage_multiplier(player)
 
-    if skill["cooldown"] > 0:
+    # クールタイム中は何もしない
+    if skill.get("cooldown", 0) > 0 and skill.get("attack_remaining", 0) <= 0:
         return
 
-    for target_id, target in players_snapshot().items():
-        if target_id == player_id or not target["alive"]:
-            continue
-
-        dx = player["rect"].centerx - target["rect"].centerx
-        dy = player["rect"].centery - target["rect"].centery
-        dist = (dx**2 + dy**2) ** 0.5
-
-        # === Assassin ===
-        if player["job"] == "Assassin":
-            if skill == job_data["Assassin"]["skills"]["criticalAttackMulti"] and abs(dx) <= 100:
-                skill.update({
-                    "active": True,
-                    "target_id": target_id,
-                    "attack_remaining": skill.get("hits", 3),
-                    "interval": skill.get("interval", 0.35),
-                    "next_attack_time": time.time() + skill.get("interval", 0.35),
-                    "end_time": time.time() + skill.get("hits", 3) * skill.get("interval", 0.35) + 0.05,
-                    "cooldown": cooltime
-                })
-                player["common"]["stun"]["stuned"] = True
-                player["common"]["stun"]["end_time"] = skill["end_time"]
-                player["animation_state"] = "attack2"
-                player["animations"]["attack2"].index = 0
-                continue
-
-            elif skill == job_data["Assassin"]["skills"]["shadow_move"] and dist < 800:
-                send_skill_effect("shadow_move", player["rect"].centerx, player["rect"].centery)
-                damage = calculate_damage_with_shield(skill["damaged"], target, multiplier=get_damage_multiplier(player))
-                target["hp"] -= damage
-
-                player["rect"].x, player["rect"].y = target["rect"].x, target["rect"].y
-                target["common"]["stun"].update({"stuned": True, "end_time": time.time() + 0.1})
-                continue
-
-        elif player["job"] == "Sniper" and abs(dx) <= 2000:
-            send_skill_effect("all_death_damage", target["rect"].centerx, target["rect"].centery)
-            damage = calculate_damage_with_shield(skill["damaged"], target, multiplier=get_damage_multiplier(player))
-            target["hp"] -= damage
-
-            
-
-        elif player["job"] == "Warrior":
-            skill["active"] = True
-            if abs(dx) <= 400 and player["job_skill"]["chargeBoost"]["active"]:
-                speed = player["job_skill"]["chargeBoost"]["speed"]
-                direction = 1 if player["rect"].x < target["rect"].x else -1
-                player["rect"].x += min(abs(dx), speed) * direction
-
-                if abs(player["rect"].x - target["rect"].x) <= speed + 50:
-                    damage = calculate_damage_with_shield(skill["damaged"], target, multiplier=get_damage_multiplier(player))
-                    target["hp"] -= damage
-
-                    send_skill_effect("charge_boost", target["rect"].centerx, target["rect"].centery)
-                    
-                    player["job_skill"]["chargeBoost"]["active"] = False
-            elif abs(dx) <= 200:
-                damage = calculate_damage_with_shield(skill["damaged"], target, multiplier=get_damage_multiplier(player))
-                target["hp"] -= damage
-
-                send_skill_effect("wave_strike", target["rect"].centerx, target["rect"].centery)
-                
-
-        elif player["job"] == "Player" and dist <= 1000:
-            send_skill_effect("all_death_damage", target["rect"].centerx, target["rect"].centery)
-            skill_god = job_data["Player"]["skills"]["create_isGod"]
-            skill_god["active"] = True
-            if target["hp"] + 50 < target["maxHp"]:
-                target["hp"] += 50
-            else:
-                target["hp"] = target["maxHp"]
-            player["rect"].x, player["rect"].y = target["rect"].x, target["rect"].y
-            skill_god["active"] = False
-            
-
+    # 発動初回処理
+    if not skill.get("active", False):
+        skill["active"] = True
         skill["cooldown"] = cooltime
-        skill["active"] = False
-        handle_death(target)
-        handle_death(player)
+
+        # Assassin: criticalAttackMulti 用
+        if skill is player["job_skill"].get("criticalAttackMulti"):
+            skill["attack_remaining"] = skill.get("hits", 3)
+            skill["interval"] = skill.get("interval", 0.35)
+            skill["next_attack_time"] = current_time
+            # 最初のターゲット決定
+            for tid, t in players_snapshot().items():
+                if tid != player_id and t["alive"]:
+                    skill["target_id"] = tid
+                    break
+            player["animation_state"] = "attack2"
+            player["animations"]["attack2"].index = 0
+
+    # ターゲット取得
+    if skill is player["job_skill"].get("criticalAttackMulti") and skill.get("active", False):
+        target_id = skill.get("target_id")
+        target = players_snapshot().get(target_id)
+        if not target or not target["alive"]:
+            skill["active"] = False
+            return
+
+        # 攻撃タイミングチェック
+        if current_time >= skill["next_attack_time"] and skill["attack_remaining"] > 0:
+            dmg = skill.get("damaged", 500)
+            if target.get("isShield", False):
+                dmg /= 2
+            target["hp"] -= dmg
+            send_skill_effect("criticalAttackMulti", target["rect"].centerx, target["rect"].centery)
+            player["animation_state"] = "attack2"
+            player["animations"]["attack2"].index = 0
+            skill["attack_remaining"] -= 1
+            skill["next_attack_time"] = current_time + skill.get("interval", 0.35)
+
+            if target["hp"] <= 0:
+                target["hp"] = 0
+                target["alive"] = False
+                target["animation_state"] = "dead"
+                target["animations"]["dead"].index = 0
+
+        # 連撃終了後に active を解除
+        if skill["attack_remaining"] <= 0:
+            skill["active"] = False
+
+    else:
+        # --- 他のスキル処理 ---
+        for target_id, target in players_snapshot().items():
+            if target_id == player_id or not target["alive"]:
+                continue
+
+            dx = player["rect"].centerx - target["rect"].centerx
+            dy = player["rect"].centery - target["rect"].centery
+            dist = (dx ** 2 + dy ** 2) ** 0.5
+
+            # Assassin shadow_move
+            if skill is player["job_skill"].get("shadow_move") and dist < 800:
+                dmg = calculate_damage_with_shield(skill.get("damaged", 500), target, multiplier)
+                target["hp"] -= dmg
+                player["rect"].x, player["rect"].y = target["rect"].x, target["rect"].y
+                target["common"]["stun"].update({"stuned": True, "end_time": current_time + 0.1})
+                send_skill_effect("shadow_move", player["rect"].centerx, player["rect"].centery)
+
+            # Sniper
+            elif player["job"] == "Sniper" and abs(dx) <= 2000:
+                dmg = calculate_damage_with_shield(skill.get("damaged", 500), target, multiplier)
+                target["hp"] -= dmg
+                send_skill_effect("all_death_damage", target["rect"].centerx, target["rect"].centery)
+
+            # Warrior
+            elif player["job"] == "Warrior":
+                if player["job_skill"]["chargeBoost"]["active"]:
+                    speed = player["job_skill"]["chargeBoost"]["speed"]
+                    direction = 1 if player["rect"].x < target["rect"].x else -1
+                    player["rect"].x += min(abs(dx), speed) * direction
+                    if abs(player["rect"].x - target["rect"].x) <= speed + 50:
+                        dmg = calculate_damage_with_shield(skill.get("damaged", 500), target, multiplier)
+                        target["hp"] -= dmg
+                        send_skill_effect("charge_boost", target["rect"].centerx, target["rect"].centery)
+                        player["job_skill"]["chargeBoost"]["active"] = False
+                elif player["job_skill"]["wave_strike"]["active"] and abs(dx) <= 200:
+                    dmg = calculate_damage_with_shield(skill.get("damaged", 500), target, multiplier)
+                    target["hp"] -= dmg
+                    send_skill_effect("wave_strike", target["rect"].centerx, target["rect"].centery)
+
+            # Player
+            elif player["job"] == "Player" and dist <= 1000:
+                skill_god = player["job_skill"]["create_isGod"]
+                skill_god["active"] = True
+                target["hp"] = min(target["hp"] + 50, target["maxHp"])
+                player["rect"].x, player["rect"].y = target["rect"].x, target["rect"].y
+                send_skill_effect("all_death_damage", target["rect"].centerx, target["rect"].centery)
+                skill_god["active"] = False
+
+            handle_death(target)
+
+    handle_death(player)
+
 
 
 #バフスキルの管理

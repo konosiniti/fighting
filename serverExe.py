@@ -10,6 +10,26 @@ import math
 import sys
 import os
 
+# --- 初期化 ---
+pygame.init()
+WIDTH, HEIGHT = 992, 800
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+clock = pygame.time.Clock()
+SPEED = 4
+JUMP_VELOCITY = -8
+GRAVITY = 0.5
+SHIELD_GAGE = 500
+SHIELD_COST = 5
+offset_x = 0
+offset_y = 0
+font = pygame.font.SysFont(None, 20)
+HOST = '0.0.0.0'
+PORT = 5050
+
+# --- エフェクトの登録と管理用 ---
+effect_defs = {}
+active_effects = []
+
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS  # PyInstallerが実行ファイルを展開する一時フォルダ
@@ -76,7 +96,7 @@ class Map:
                                 row * self.tile_height - offset_y
                             ))
 
-
+# --- playerのアニメーションを管理 ---
 class Animation:
     def __init__(self, image_path, frame_width, frame_height, num_frames, speed):  # ← speed追加
         sheet = pygame.image.load(image_path).convert_alpha()
@@ -97,7 +117,7 @@ class Animation:
             self.last_update = current_time
         return self.frames[self.index]
 
-
+# --- 職業のデータ ---
 job_data = {
     "Warrior": {
         "hp": 4500,  # ↑ タンク寄りなのでHP増
@@ -173,13 +193,8 @@ def load_map(path):
     with open(path, "r") as f:
         return json.load(f)
 
-# --- pygame初期化 ---
-pygame.init()
-WIDTH, HEIGHT = 992, 800
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-clock = pygame.time.Clock()
 
-# === 汎用エフェクトアニメーションクラス ===
+# --- 汎用エフェクトアニメーションクラス ---
 class EffectAnimation:
     def __init__(self, name, image_path, frame_width, frame_height, num_frames, speed=0.1):
         self.name = name
@@ -200,14 +215,11 @@ class EffectAnimation:
             "speed": self.speed
         }
 
-# 登録と管理用
-effect_defs = {}
-active_effects = []
 
 def register_effect(name, image_path, frame_width, frame_height, num_frames, speed=0.1):
     effect_defs[name] = EffectAnimation(name, image_path, frame_width, frame_height, num_frames, speed)
 
-
+# --- エフェクトのアニメーションの描画 ---
 def update_and_draw_effects(surface, offset_x=0, offset_y=0):
     for effect in active_effects[:]:
         now = time.time()
@@ -243,13 +255,14 @@ def send_skill_effect(name, x, y, duration=0.5):
         "duration": duration
     })
 
-
+# --- 魔法使いのエフェクト ---
 element_effects = [
     "fire", "water", "lightning",
     "earth", "wind", "ice"
 ]
 
-
+skill_effects = []  # エフェクト保存用リスト
+traps = []
 
 #起動時に一度だけ登録
 register_effect("stun", resource_path("img/effects/stun.png"), 192, 192, 10, 0.05)
@@ -273,6 +286,7 @@ def get_sprite(sheet, col, row, width, height):
     return sprite
 
 
+# --- playerのアニメーションの定義
 def create_animations():
     return {
         'run': Animation(resource_path("アニメーション/Run.png"), 128, 128, 8, 0.1),
@@ -302,9 +316,6 @@ all_map = [
     resource_path("map/battle.json")
 ]
 
-skill_effects = []  # エフェクト保存用リスト
-traps = []
-
 
 # shieldスプライトは5フレーム分 (i=5〜1)
 player_shields = [get_sprite(shieldsheet, i, 0, 50, 50) for i in range(5, 0, -1)]
@@ -315,16 +326,7 @@ def players_snapshot():
     # Shallow copy is enough; values (player dicts) are shared so mutations to pdata reflect back.
     with players_lock:
         return dict(players)
-SPEED = 4
-JUMP_VELOCITY = -8
-GRAVITY = 0.5
-SHIELD_GAGE = 500
-SHIELD_COST = 5
-offset_x = 0
-offset_y = 0
-font = pygame.font.SysFont(None, 20)
-HOST = '0.0.0.0'
-PORT = 5050
+
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -338,18 +340,21 @@ map_data = load_map(selected_map)
 game_map = Map(map_data)
 
 
+# --- シールドゲージの描画
 def draw_shield_gage(surface, x, y, gage, max_gage=500, width=40, height=5):
     ratio = gage / max_gage
     pygame.draw.rect(surface, (100, 100, 100), (x, y - 15, width, height))
     pygame.draw.rect(surface, (0, 200, 255), (x, y - 15, width * ratio, height))
 
 
+# --- playerの体力の描画
 def draw_health_bar(surface, x, y, hp, max_hp=100, width=40, height=5):
     ratio = hp / max_hp
     pygame.draw.rect(surface, (255, 0, 0), (x, y - 10, width, height))
     pygame.draw.rect(surface, (0, 255, 0), (x, y - 10, width * ratio, height))
 
 
+# --- player_idの描画
 def draw_name(surface, x, y, player_id, width=40, height=40):
     text_surface = font.render(f"{player_id}", True, (0, 0, 0), (255, 255, 255))
     text_rect = text_surface.get_rect()
@@ -357,6 +362,7 @@ def draw_name(surface, x, y, player_id, width=40, height=40):
     surface.blit(text_surface, text_rect)
 
 
+# --- player同士の当たり判定処理 ---
 def handle_collision(player_id):
     with players_lock:
         player_rect = players[player_id]["rect"]
@@ -393,6 +399,7 @@ def handle_collision(player_id):
                     player_rect.left = other_rect.right
 
 
+# --- マップとの当たり判定処理 ---
 def handle_map_collision(player):
     if not game_map.collide_layer:
         return
@@ -438,6 +445,7 @@ def handle_map_collision(player):
                             rect.left = tile_rect.right
 
 
+# --- 主な処理 ---
 def handle_client(client_socket, client_address, player_id):
     
     print(f"Player {player_id} connected from {client_address}")
@@ -985,6 +993,7 @@ def handle_client(client_socket, client_address, player_id):
         print(f"Player {player_id} disconnected.")
 
 
+# --- シールド時のダメージ計算処理
 def calculate_damage_with_shield(raw_damage, target, multiplier=1.0, ignore_defense=False, min_ratio=0.1):
     # 1. ランダム変動
     variation = random.uniform(0.9, 1.1)
@@ -1018,6 +1027,7 @@ def calculate_damage_with_shield(raw_damage, target, multiplier=1.0, ignore_defe
     return max(1, int(math.floor(damage)))
 
 
+# --- ダメージ計算処理 ---
 def get_damage_multiplier(player):
     multiplier = 1.0
 
@@ -1036,6 +1046,7 @@ def get_damage_multiplier(player):
     return multiplier
 
 
+# ---　防御力のバフ処理 ---
 def get_defense_multiplier(player):
     multiplier = 1.0
     for debuff in player.get("debuff_effects", []):
@@ -1044,6 +1055,7 @@ def get_defense_multiplier(player):
     return multiplier
 
 
+# --- 自身もしくは相手が死んだか判定 ---
 def handle_death(p):
     if p["hp"] <= 0:
         p["animation_state"] = "dead"
@@ -1052,6 +1064,7 @@ def handle_death(p):
         p["hp"] = 0
 
 
+# --- buff状態にし、ステータスを上げる処理 ---
 def update_buff_effects(player):
     current_time = time.time()
     effects = player.get("buffed_effects", [])
@@ -1071,6 +1084,7 @@ def update_buff_effects(player):
         update_buffed_stats(player)
 
 
+# --- buffの終了を確認しバフ以前の状態に戻す ---
 def update_buffed_stats(player):
     job_stats = job_data.get(player["job"], {})
     base_damaged = job_stats.get("damaged", 1)
@@ -1088,7 +1102,8 @@ def update_buffed_stats(player):
 
     print(f"[BUFF RECALC] {player['job']} damaged: {player['damaged']}, defense: {player['defense']}, attack_cooldown: {player['attack_cooldown']}")
 
-#奥義とかのスキル管理
+
+# --- 奥義スキル管理 ---
 def AttackSuper(player, player_id, skill, cooltime):
     current_time = time.time()
     multiplier = get_damage_multiplier(player)
@@ -1158,7 +1173,7 @@ def AttackSuper(player, player_id, skill, cooltime):
         handle_death(player)
 
 
-#職業スキル
+# --- 職業スキル管理 ---
 def attackSkill(player, player_id, skill, cooltime):
     current_time = time.time()
     multiplier = get_damage_multiplier(player)
@@ -1269,8 +1284,7 @@ def attackSkill(player, player_id, skill, cooltime):
     handle_death(player)
 
 
-
-#バフスキルの管理
+# --- バフスキル管理 ---
 def buffSkill(player, skill, cooltime, duration):
     current_time = time.time()
     if skill["cooldown"] <= 0:
@@ -1294,6 +1308,7 @@ def buffSkill(player, skill, cooltime, duration):
         print(f"[BUFF] {player['job']} {multipliers}")
 
 
+# --- デバフスキル管理 ---
 def debuffSkill(user, target, skill, cooltime, duration):
     current_time = time.time()
     if skill.get("cooldown", 0) > 0:
@@ -1312,6 +1327,7 @@ def debuffSkill(user, target, skill, cooltime, duration):
     print(f"[DEBUFF] {user['job']} → {target['job']} {debuff['multipliers']}")
 
 
+# --- トラップスキル管理 ---
 def TrapSkill(player, player_id, skill, cooltime, duration=10):
     current_time = time.time()
 
@@ -1337,7 +1353,7 @@ def TrapSkill(player, player_id, skill, cooltime, duration=10):
     print(f"Player {player_id} set a claymore trap.")
 
 
-#状態異常の管理
+# --- 状態異常管理 ---
 def abnormal_condition(target, target_id, player, player_id):
     print(f"Player {player_id} activated punch!")
     damage = calculate_damage_with_shield(player["damaged"], target, multiplier=get_damage_multiplier(player))
@@ -1355,6 +1371,7 @@ def abnormal_condition(target, target_id, player, player_id):
         print(f"Player {target_id} is regenerated!")
 
 
+# --- 魔法使いスキル属性管理 ---
 def apply_element_effect(player, target, skill, player_id):
     element = player.get("element_type", "fire")
 
@@ -1396,6 +1413,7 @@ def apply_element_effect(player, target, skill, player_id):
             player["hp"] = player["maxHp"]
 
 
+# --- player_idの振り分け ---
 def accept_connections():
     player_id = 0
     while True:
@@ -1404,6 +1422,7 @@ def accept_connections():
         player_id += 1
 
 
+# --- メインループ ---
 def main():
     threading.Thread(target=accept_connections, daemon=True).start()
     running = True
@@ -1442,8 +1461,8 @@ def main():
                     shield_sprite = player_shields[int(pdata["ShieldGage"] / 10) % len(player_shields)]
                     screen.blit(shield_sprite, (rect.x - 5 - offset_x, rect.y - offset_y+35))
                 # スキル中なら枠など表示
-                if any(skill_info.get("active", False) for skill_info in pdata["common"].values()):
-                    pygame.draw.rect(screen, (255, 255, 0), rect.inflate(10, 10), 3)
+                # if any(skill_info.get("active", False) for skill_info in pdata["common"].values()):
+                #     pygame.draw.rect(screen, (255, 255, 0), rect.inflate(10, 10), 3)
                     
         pygame.display.flip()
 
